@@ -9,13 +9,19 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource/roboto": "^5.2.9",
     "@tailwindcss/vite": "^4.1.18",
     "tailwindcss": "^4.1.18",
-    "vue": "^3.2.37"
+    "unplugin-fonts": "^1.4.0",
+    "vue": "^3.2.37",
+    "vue-router": "4",
+    "vuetify": "^3.11.7"
   },
   "devDependencies": {
     "@babel/types": "^7.18.10",
+    "@fortawesome/fontawesome-free": "^7.1.0",
     "@iconify/json": "^2.2.431",
+    "@mdi/font": "^7.4.47",
     "@types/node": "^25.0.10",
     "@vitejs/plugin-vue": "^6.0.3",
     "daisyui": "^5.5.14",

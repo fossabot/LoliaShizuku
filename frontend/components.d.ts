@@ -13,11 +13,13 @@ declare module 'vue' {
   export interface GlobalComponents {
     AppHeader: typeof import('./src/components/AppHeader.vue')['default']
     AppLogo: typeof import('./src/components/AppLogo.vue')['default']
-    HelloWorld: typeof import('./src/components/HelloWorld.vue')['default']
     ILucideCopy: typeof import('~icons/lucide/copy')['default']
     ILucideMinus: typeof import('~icons/lucide/minus')['default']
     ILucidePanelBottom: typeof import('~icons/lucide/panel-bottom')['default']
     ILucideSun: typeof import('~icons/lucide/sun')['default']
     ILucideX: typeof import('~icons/lucide/x')['default']
+    MainPage: typeof import('./src/components/MainPage.vue')['default']
+    RouterLink: typeof import('vue-router')['RouterLink']
+    RouterView: typeof import('vue-router')['RouterView']
   }
 }

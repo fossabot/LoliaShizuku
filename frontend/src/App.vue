@@ -1,13 +1,18 @@
 <script lang="ts" setup>
-import HelloWorld from "./components/HelloWorld.vue";
 import AppHeader from "./components/AppHeader.vue";
 </script>
 
 <template>
-  <div class="h-screen flex flex-col overflow-hidden">
+  <v-app>
     <AppHeader style="--wails-draggable: drag" />
-    <div class="flex-1 overflow-auto">
-      <HelloWorld />
-    </div>
-  </div>
+    <v-main>
+      <router-view v-slot="{ Component, route }">
+        <v-fade-transition :leave-absolute="true">
+          <div :key="route.name" style="height: 100%">
+            <component :is="Component" />
+          </div>
+        </v-fade-transition>
+      </router-view>
+    </v-main>
+  </v-app>
 </template>
