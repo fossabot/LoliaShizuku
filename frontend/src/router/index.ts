@@ -46,11 +46,11 @@ router.beforeEach(async (to) => {
     return true
   }
 
-  //const ok = await hasOAuthToken()
-  //if (!ok) {
-  //  return { path: '/oauth', replace: true }
-  //}
-  //return true
+  const ok = await hasOAuthToken()
+  if (!ok) {
+    return { path: '/oauth', replace: true }
+  }
+  return true
 })
 
 export default router
