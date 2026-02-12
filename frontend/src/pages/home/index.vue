@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref, computed } from "vue";
+import { computed, onMounted, ref } from "vue";
 import {
   VisXYContainer,
   VisLine,
@@ -9,35 +9,46 @@ import {
   VisTooltip,
 } from "@unovis/vue";
 import { useElementSize } from "@vueuse/core";
+import {
+  getDashboard,
+  getTrafficDaily,
+  type DailyTrafficResponse,
+} from "@/services/center";
+import { useGlobalLoading } from "@/composables/globalLoading";
 
 defineOptions({
   name: "HomePage",
 });
 
-// 定义数据类型
-interface TrafficDataPoint {
+type TunnelData = {
+  name: string;
+  amount: number;
+};
+
+type DataRecord = {
   date: Date;
-  total: number;
-}
+  amount: number;
+  tunnels: TunnelData[];
+};
 
-// 用户信息
+const errorMessage = ref("");
+const { withGlobalLoading } = useGlobalLoading();
+
 const userInfo = ref({
-  name: "米露",
-  email: "user@example.com",
-  avatarUrl:
-    "https://cn.cravatar.com/avatar/ccd1317597a7796d8b5f2b2785e88d5f?s=180&d=mp&r=g",
+  name: "-",
+  email: "-",
+  avatarUrl: "",
 });
 
-// 用户统计数据
 const stats = ref({
-  availableTraffic: 125.5,
-  totalTraffic: 500,
-  tunnelCount: 8,
-  tunnelLimit: 20,
-  bandwidthLimit: "100 Mbps",
+  availableTraffic: 0,
+  tunnelCount: 0,
+  tunnelLimit: 0,
+  bandwidthLimit: "-",
 });
 
-// 获取问候语
+const dailyTraffic = ref<DailyTrafficResponse | null>(null);
+
 const greeting = computed(() => {
   const hour = new Date().getHours();
   if (hour < 6) return "夜深了，早点休息喵";
@@ -50,60 +61,138 @@ const greeting = computed(() => {
 });
 
 const cardRef = ref<HTMLElement | null>(null);
-const { width, height } = useElementSize(cardRef);
+const { width } = useElementSize(cardRef);
 
-// 流量数据
-const data: TrafficDataPoint[] = [
-  { date: new Date(2025, 0, 24, 0), total: 460 },
-  { date: new Date(2025, 0, 24, 2), total: 290 },
-  { date: new Date(2025, 0, 24, 4), total: 195 },
-  { date: new Date(2025, 0, 24, 6), total: 375 },
-  { date: new Date(2025, 0, 24, 8), total: 790 },
-  { date: new Date(2025, 0, 24, 10), total: 1270 },
-  { date: new Date(2025, 0, 24, 12), total: 1720 },
-  { date: new Date(2025, 0, 24, 14), total: 2060 },
-  { date: new Date(2025, 0, 24, 16), total: 1580 },
-  { date: new Date(2025, 0, 24, 18), total: 1910 },
-  { date: new Date(2025, 0, 24, 20), total: 2400 },
-  { date: new Date(2025, 0, 24, 22), total: 1430 },
-];
+const data = computed<DataRecord[]>(() => {
+  if (!dailyTraffic.value?.daily_stats) {
+    return [];
+  }
 
-// Unovis 配置
-const x = (_: TrafficDataPoint, i: number) => i;
-const y = (d: TrafficDataPoint) => d.total;
+  return dailyTraffic.value.daily_stats.map((stat) => ({
+    date: new Date(stat.date),
+    amount: Number(stat.total_traffic || 0) / (1024 * 1024 * 1024),
+    tunnels:
+      stat.tunnel_stats?.map((tunnel) => ({
+        name: tunnel.remark || tunnel.tunnel_name,
+        amount: Number(tunnel.total_traffic || 0) / (1024 * 1024 * 1024),
+      })) ?? [],
+  }));
+});
 
-// 计算总流量
-const total = computed(
-  () => data.reduce((acc, { total }) => acc + total, 0) / 1024,
+const x = (_: DataRecord, i: number) => i;
+const y = (d: DataRecord) => d.amount;
+
+const total = computed(() =>
+  data.value.reduce((acc: number, current) => acc + current.amount, 0),
 );
 
 const formatNumber = (value: number) => `${value.toFixed(2)} GB`;
 
-const formatTime = (date: Date): string => {
-  const hours = date.getHours();
-  return `${hours.toString().padStart(2, "0")}:00`;
+const formatBytes = (value: number): string => {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = value;
+  let index = 0;
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024;
+    index++;
+  }
+  return `${size.toFixed(2)} ${units[index]}`;
+};
+
+const formatDate = (date: Date): string => {
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  return `${month}月${day}日`;
 };
 
 const xTicks = (i: number) => {
-  if (i === 0 || i === data.length - 1 || !data[i]) {
+  if (i === 0 || i === data.value.length - 1 || !data.value[i]) {
     return "";
   }
-  return formatTime(data[i].date);
+  return formatDate(data.value[i].date);
 };
 
-const template = (d: TrafficDataPoint) => {
+const template = (d: DataRecord) => {
   if (!d) return "";
+
+  const tunnelItems = (d.tunnels || [])
+    .map(
+      (tunnel) => `
+      <div style="display:flex; justify-content:space-between; gap:1rem; padding:0.25rem 0;">
+        <span style="opacity:0.8;">${tunnel.name}</span>
+        <span style="font-weight:600;">${tunnel.amount.toFixed(2)}GB</span>
+      </div>
+    `,
+    )
+    .join("");
 
   return `
     <div>
-      <div style="font-weight: 600; margin-bottom: 0.5rem;">
-        ${formatTime(d.date)}
+      <div style="font-weight:600;">
+        ${formatDate(d.date)}
       </div>
-      <div style="font-weight: 500;">
-        ${formatNumber(d.total / 1024)}
+      <div style="font-weight:500; margin-bottom:0.5rem; padding-bottom:0.5rem; border-bottom:1px solid rgba(127,127,127,0.25);">
+        ${formatNumber(d.amount)}
       </div>
+      ${tunnelItems}
     </div>
   `;
+};
+
+const loadDashboard = async () => {
+  try {
+    const dashboard = await getDashboard();
+    const trafficLimit = Number(
+      dashboard.traffic?.traffic_limit ?? dashboard.user?.traffic_limit ?? 0,
+    );
+    const trafficUsed = Number(
+      dashboard.traffic?.traffic_used ?? dashboard.user?.traffic_used ?? 0,
+    );
+    const trafficRemaining = Number(
+      dashboard.traffic?.traffic_remaining ??
+        Math.max(trafficLimit - trafficUsed, 0),
+    );
+
+    userInfo.value = {
+      name: dashboard.user?.username || "-",
+      email: dashboard.user?.email || "-",
+      avatarUrl: dashboard.user?.avatar || "",
+    };
+
+    stats.value = {
+      availableTraffic: trafficRemaining,
+      tunnelCount: Number(
+        dashboard.tunnel?.count ?? dashboard.tunnels?.length ?? 0,
+      ),
+      tunnelLimit: Number(dashboard.user?.max_tunnel_count ?? 0),
+      bandwidthLimit:
+        dashboard.user?.bandwidth_limit !== undefined
+          ? `${dashboard.user.bandwidth_limit} Mbps`
+          : "-",
+    };
+  } catch (error) {
+    errorMessage.value =
+      error instanceof Error ? error.message : "加载主页数据失败";
+  }
+};
+
+const loadDailyTraffic = async () => {
+  try {
+    dailyTraffic.value = await getTrafficDaily(7);
+  } catch (error) {
+    errorMessage.value =
+      error instanceof Error ? error.message : "加载近七天流量失败";
+  }
+};
+
+const loadData = async () => {
+  errorMessage.value = "";
+  await withGlobalLoading(async () => {
+    await Promise.all([loadDashboard(), loadDailyTraffic()]);
+  });
 };
 
 const chartVars = {
@@ -117,11 +206,18 @@ const chartVars = {
   "--vis-tooltip-text-color": "rgb(var(--v-theme-on-surface))",
   "--vis-tooltip-border-radius": "10px",
 } as const;
+
+onMounted(() => {
+  void loadData();
+});
 </script>
 
 <template>
   <div class="d-flex flex-column ga-4">
-    <!-- 用户问候卡片 -->
+    <v-alert v-if="errorMessage" type="error" variant="tonal" class="mb-1">
+      {{ errorMessage }}
+    </v-alert>
+
     <v-card elevation="2" class="pa-6">
       <div class="d-flex align-center ga-4">
         <v-avatar
@@ -141,7 +237,6 @@ const chartVars = {
       </div>
     </v-card>
 
-    <!-- 统计卡片 -->
     <v-card elevation="2">
       <v-row dense>
         <v-col cols="12" md="4">
@@ -152,7 +247,7 @@ const chartVars = {
             <div class="d-flex flex-column">
               <div class="text-caption text-medium-emphasis">可用流量</div>
               <div class="text-h5 font-weight-bold">
-                {{ formatNumber(stats.availableTraffic) }}
+                {{ formatBytes(stats.availableTraffic) }}
               </div>
             </div>
           </div>
@@ -192,13 +287,10 @@ const chartVars = {
       </v-row>
     </v-card>
 
-    <!-- 图表卡片 -->
     <v-card ref="cardRef" elevation="2">
       <v-card-title>
         <div class="d-flex flex-column ga-1">
-          <div class="text-caption text-medium-emphasis">
-            过去 24 小时流量使用
-          </div>
+          <div class="text-caption text-medium-emphasis">近七天流量使用</div>
           <div class="text-h5 font-weight-bold">
             {{ formatNumber(total) }}
           </div>

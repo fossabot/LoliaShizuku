@@ -1,192 +1,190 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
+import {
+  getRunnerRuntimeStatus,
+  getTunnelsOverview,
+  startRunner,
+  type RunnerRuntimeStatus,
+  type TunnelOverviewItem,
+} from "@/services/center";
+import { BrowserOpenURL } from "../../../wailsjs/runtime/runtime";
+import { useGlobalLoading } from "@/composables/globalLoading";
 
 defineOptions({
   name: "TunnelsPage",
 });
 
-// 隧道数据类型
-interface Tunnel {
-  id: string;
-  name: string;
-  type: string;
-  localAddress: string;
-  localPort: number;
-  remotePort: number;
-  status: "running" | "stopped" | "error";
-  createdAt: string;
-  traffic: {
-    in: number;
-    out: number;
-  };
-}
-
-// 隧道列表
-const tunnels = ref<Tunnel[]>([
-  {
-    id: "1",
-    name: "SSH 隧道",
-    type: "tcp",
-    localAddress: "127.0.0.1",
-    localPort: 22,
-    remotePort: 6001,
-    status: "running",
-    createdAt: "2025-01-20 10:30",
-    traffic: { in: 125.6, out: 89.3 },
-  },
-  {
-    id: "2",
-    name: "Web 服务",
-    type: "http",
-    localAddress: "127.0.0.1",
-    localPort: 8080,
-    remotePort: 80,
-    status: "running",
-    createdAt: "2025-01-21 14:20",
-    traffic: { in: 1567.8, out: 2341.2 },
-  },
-  {
-    id: "3",
-    name: "数据库访问",
-    type: "tcp",
-    localAddress: "127.0.0.1",
-    localPort: 3306,
-    remotePort: 6003,
-    status: "stopped",
-    createdAt: "2025-01-22 09:15",
-    traffic: { in: 45.2, out: 32.1 },
-  },
-  {
-    id: "4",
-    name: "开发服务器",
-    type: "tcp",
-    localAddress: "192.168.1.100",
-    localPort: 3000,
-    remotePort: 6004,
-    status: "stopped",
-    createdAt: "2025-01-23 16:45",
-    traffic: { in: 0, out: 0 },
-  },
-  {
-    id: "5",
-    name: "开发服务器",
-    type: "tcp",
-    localAddress: "192.168.1.100",
-    localPort: 3000,
-    remotePort: 6004,
-    status: "stopped",
-    createdAt: "2025-01-23 16:45",
-    traffic: { in: 0, out: 0 },
-  },
-  {
-    id: "6",
-    name: "开发服务器",
-    type: "tcp",
-    localAddress: "192.168.1.100",
-    localPort: 3000,
-    remotePort: 6004,
-    status: "stopped",
-    createdAt: "2025-01-23 16:45",
-    traffic: { in: 0, out: 0 },
-  },
-  {
-    id: "7",
-    name: "开发服务器",
-    type: "tcp",
-    localAddress: "192.168.1.100",
-    localPort: 3000,
-    remotePort: 6004,
-    status: "stopped",
-    createdAt: "2025-01-23 16:45",
-    traffic: { in: 0, out: 0 },
-  },
-  {
-    id: "8",
-    name: "开发服务器",
-    type: "tcp",
-    localAddress: "192.168.1.100",
-    localPort: 3000,
-    remotePort: 6004,
-    status: "stopped",
-    createdAt: "2025-01-23 16:45",
-    traffic: { in: 0, out: 0 },
-  },
-]);
-
-// 搜索查询
+const errorMessage = ref("");
 const searchQuery = ref("");
+const tunnels = ref<TunnelOverviewItem[]>([]);
+const { withGlobalLoading } = useGlobalLoading();
+const router = useRouter();
+const runnerStatus = ref<RunnerRuntimeStatus>({
+  running: false,
+  pid: 0,
+  started_at: "",
+  tunnel_name: "",
+  command: "",
+  last_error: "",
+  log_lines: [],
+});
+const startingTunnelName = ref("");
 
-// 格式化流量显示
-const formatTraffic = (mb: number) => {
-  if (mb < 1024) return `${mb.toFixed(2)} MB`;
-  return `${(mb / 1024).toFixed(2)} GB`;
+const filteredTunnels = computed(() => {
+  const keyword = searchQuery.value.trim().toLowerCase();
+  if (!keyword) {
+    return tunnels.value;
+  }
+
+  return tunnels.value.filter((tunnel) => {
+    const haystack = [
+      tunnel.name,
+      tunnel.type,
+      tunnel.remark,
+      tunnel.custom_domain,
+      tunnel.local_ip,
+      String(tunnel.local_port),
+      String(tunnel.remote_port),
+      String(tunnel.id),
+    ]
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(keyword);
+  });
+});
+const isRunnerRunning = computed(() => runnerStatus.value.running);
+
+const loadTunnels = async () => {
+  errorMessage.value = "";
+
+  await withGlobalLoading(async () => {
+    try {
+      const [response, status] = await Promise.all([
+        getTunnelsOverview(1, 100, 2),
+        getRunnerRuntimeStatus(),
+      ]);
+      tunnels.value = response.list ?? [];
+      runnerStatus.value = status;
+    } catch (error) {
+      errorMessage.value =
+        error instanceof Error ? error.message : "加载隧道列表失败，请稍后重试";
+    }
+  });
 };
 
-// 获取状态颜色
+const formatBytes = (value: number) => {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = value;
+  let index = 0;
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024;
+    index++;
+  }
+  return `${size.toFixed(2)} ${units[index]}`;
+};
+
 const getStatusColor = (status: string) => {
-  switch (status) {
-    case "running":
-      return "success";
-    case "stopped":
-      return "grey";
-    case "error":
-      return "error";
-    default:
-      return "grey";
+  const normalized = status.toLowerCase();
+  if (normalized === "active") {
+    return "success";
   }
+  if (normalized === "inactive") {
+    return "grey";
+  }
+  return "info";
 };
 
-// 获取状态文本
 const getStatusText = (status: string) => {
-  switch (status) {
-    case "running":
-      return "运行中";
-    case "stopped":
-      return "已停止";
-    case "error":
-      return "错误";
-    default:
-      return "未知";
+  const normalized = status.toLowerCase();
+  if (normalized === "active") {
+    return "运行中";
+  }
+  if (normalized === "inactive") {
+    return "已停止";
+  }
+  return status || "未知";
+};
+
+const openTunnelDetail = (name: string) => {
+  const tunnelName = name.trim();
+  if (!tunnelName) {
+    return;
+  }
+  BrowserOpenURL(
+    `https://dash.lolia.link/dash/tunnel/${encodeURIComponent(tunnelName)}`,
+  );
+};
+
+const isStartedTunnel = (tunnelName: string) =>
+  isRunnerRunning.value &&
+  (runnerStatus.value.tunnel_name || "").trim() === tunnelName.trim();
+
+const handleStartTunnel = async (tunnelName: string) => {
+  errorMessage.value = "";
+  startingTunnelName.value = tunnelName;
+  try {
+    runnerStatus.value = await startRunner(tunnelName);
+    await loadTunnels();
+    await router.push("/runner");
+  } catch (error) {
+    errorMessage.value =
+      error instanceof Error ? error.message : "启动隧道失败，请稍后重试";
+  } finally {
+    startingTunnelName.value = "";
   }
 };
 
-// 切换隧道状态
-const toggleTunnel = (tunnel: Tunnel) => {
-  const newStatus = tunnel.status === "running" ? "stopped" : "running";
-  tunnel.status = newStatus;
-};
+onMounted(() => {
+  void loadTunnels();
+});
 </script>
 
 <template>
   <div>
-    <!-- 顶部操作栏 -->
+    <v-alert v-if="errorMessage" type="error" variant="tonal" class="mb-3">
+      {{ errorMessage }}
+    </v-alert>
+
     <v-card elevation="2" class="mb-4">
       <v-card-text class="d-flex align-center flex-wrap ga-4">
         <v-text-field
           v-model="searchQuery"
-          label="搜索"
+          label="搜索隧道"
           prepend-inner-icon="fas fa-search"
           hide-details="auto"
           clearable
           class="flex-grow-1"
         />
 
-        <v-btn color="primary" variant="tonal">
-          <v-icon start>fas fa-plus</v-icon>
-          创建隧道
+        <v-btn color="primary" variant="tonal" @click="loadTunnels">
+          <v-icon start>fas fa-rotate</v-icon>
+          刷新
         </v-btn>
       </v-card-text>
     </v-card>
 
-    <!-- 隧道卡片网格 -->
     <v-row dense>
-      <v-col v-for="tunnel in tunnels" :key="tunnel.id" cols="12" sm="6" md="4">
+      <v-col
+        v-for="tunnel in filteredTunnels"
+        :key="tunnel.id"
+        cols="12"
+        sm="6"
+        md="4"
+      >
         <v-card elevation="2" class="h-100 d-flex flex-column">
           <v-card-title class="d-flex align-center justify-space-between">
             <span class="text-subtitle-1 font-weight-bold">
-              {{ tunnel.name }}
+              {{ tunnel.remark }}
             </span>
-            <v-chip :color="getStatusColor(tunnel.status)" class="rounded-pill" size="small">
+            <v-chip
+              :color="getStatusColor(tunnel.status)"
+              class="rounded-pill"
+              size="small"
+            >
               <v-icon start size="14">fas fa-circle</v-icon>
               {{ getStatusText(tunnel.status) }}
             </v-chip>
@@ -194,72 +192,77 @@ const toggleTunnel = (tunnel: Tunnel) => {
 
           <v-card-text class="d-flex flex-column ga-2 pt-0">
             <div class="d-flex align-center">
+              <v-icon size="14" class="me-2">fas fa-network-wired</v-icon>
+              <span class="text-caption">{{ tunnel.type.toUpperCase() }}</span>
+            </div>
+
+            <div class="d-flex align-center">
               <v-icon size="14" class="me-2">fas fa-server</v-icon>
               <span class="text-caption">
-                {{ tunnel.localAddress }}:{{ tunnel.localPort }}
+                {{ tunnel.local_ip }}:{{ tunnel.local_port }}
               </span>
             </div>
 
             <div class="d-flex align-center">
               <v-icon size="14" class="me-2">fas fa-arrow-right</v-icon>
-              <span class="text-caption">端口 {{ tunnel.remotePort }}</span>
+              <span class="text-caption">端口 {{ tunnel.remote_port }}</span>
             </div>
 
             <div class="d-flex align-center">
               <v-icon size="14" class="me-2">fas fa-exchange-alt</v-icon>
               <span class="text-caption">
-                ↓ {{ formatTraffic(tunnel.traffic.in) }} / ↑
-                {{ formatTraffic(tunnel.traffic.out) }}
+                ↓ {{ formatBytes(Number(tunnel.total_in ?? 0)) }} / ↑
+                {{ formatBytes(Number(tunnel.total_out ?? 0)) }}
               </span>
             </div>
           </v-card-text>
 
           <v-divider />
 
-          <v-card-actions class="px-4 pb-4">
+          <v-card-actions>
+            <v-btn
+              color="success"
+              variant="tonal"
+              size="small"
+              prepend-icon="fas fa-play"
+              :loading="startingTunnelName === tunnel.name"
+              :disabled="!!startingTunnelName || isRunnerRunning"
+              @click="handleStartTunnel(tunnel.name)"
+            >
+              {{ isStartedTunnel(tunnel.name) ? "已启动" : "启动" }}
+            </v-btn>
             <v-spacer />
             <v-btn
-              :color="tunnel.status === 'running' ? 'warning' : 'success'"
-              variant="tonal"
-              @click="toggleTunnel(tunnel)"
-              :prepend-icon="
-                tunnel.status === 'running' ? 'fas fa-stop' : 'fas fa-play'
-              "
-              size="small"
-            >
-              {{ tunnel.status === "running" ? "停止" : "启动" }}
-            </v-btn>
-
-            <v-btn
-              color="info"
+              color="secondary"
               variant="tonal"
               size="small"
-              prepend-icon="fas fa-cog"
+              prepend-icon="fas fa-eye"
+              @click="openTunnelDetail(tunnel.name)"
             >
-              设置
+              详情
             </v-btn>
           </v-card-actions>
         </v-card>
       </v-col>
 
-      <!-- 空状态 -->
-      <v-col v-if="tunnels.length === 0" cols="12">
+      <v-col v-if="filteredTunnels.length === 0" cols="12">
         <v-card elevation="0" class="text-center py-16">
           <v-icon size="64" color="grey-lighten-1" class="mb-4">
             fas fa-folder-open
           </v-icon>
           <div class="text-h6 font-weight-bold text-medium-emphasis mb-2">
-            还没有隧道
+            暂无可展示的隧道
           </div>
           <div class="text-body-2 text-medium-emphasis mb-4">
-            创建你的第一个隧道开始使用吧
+            你可以尝试刷新或调整搜索条件
           </div>
           <v-btn
             color="primary"
             variant="tonal"
-            prepend-inner-icon="fas fa-plus"
+            prepend-inner-icon="fas fa-rotate"
+            @click="loadTunnels"
           >
-            创建隧道
+            重新加载
           </v-btn>
         </v-card>
       </v-col>

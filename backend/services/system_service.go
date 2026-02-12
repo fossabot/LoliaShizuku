@@ -11,8 +11,8 @@ import (
 )
 
 type systemService struct {
-	ctx        context.Context
-	loopOnce   sync.Once
+	ctx      context.Context
+	loopOnce sync.Once
 
 	configManager *config.Manager
 }

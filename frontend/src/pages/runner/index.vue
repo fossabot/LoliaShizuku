@@ -1,83 +1,299 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import {
+  getRunnerData,
+  getRunnerRuntimeStatus,
+  getTunnelsOverview,
+  startRunner,
+  stopRunner,
+  type RunnerRuntimeStatus,
+} from "@/services/center";
+import { useGlobalLoading } from "@/composables/globalLoading";
 
 defineOptions({
   name: "RunnerPage",
 });
 
-const isRunning = ref(true);
+const errorMessage = ref("");
+const { withGlobalLoading } = useGlobalLoading();
+const runningAction = ref(false);
+const runtimePolling = ref(false);
+let runtimePollTimer: ReturnType<typeof setInterval> | null = null;
 
 const summary = ref({
-  server: "frp.lolia.cn:7000",
-  protocol: "tcp",
-  version: "v0.54.0",
-  pid: 24860,
-  startTime: "2026-02-04 10:12:14",
+  server: "-",
+  protocol: "-",
+  version: "-",
+  pid: "-",
+  startTime: "-",
 });
 
-const tunnels = ref([
-  {
-    name: "web-prod",
-    local: "127.0.0.1:8080",
-    remote: "frp.lolia.cn:31080",
-    status: "在线",
-    statusColor: "success",
-  },
-  {
-    name: "ssh-dev",
-    local: "127.0.0.1:22",
-    remote: "frp.lolia.cn:31022",
-    status: "在线",
-    statusColor: "success",
-  },
-  {
-    name: "grafana",
-    local: "127.0.0.1:3000",
-    remote: "frp.lolia.cn:31090",
-    status: "等待重连",
-    statusColor: "warning",
-  },
-]);
+const tunnels = ref<
+  Array<{
+    name: string;
+    remark: string;
+    local: string;
+    remote: string;
+    remotePort: number;
+    status: string;
+    statusColor: string;
+  }>
+>([]);
 
-const logs = ref([
-  "2026/02/04 10:12:14 [I] [service.go:316] start frpc service for config file",
-  "2026/02/04 10:12:14 [I] [root.go:105] frpc version 0.54.0",
-  "2026/02/04 10:12:15 [I] [login.go:92] login to server success, server address: frp.lolia.cn:7000",
-  "2026/02/04 10:12:15 [I] [proxy_manager.go:173] proxy added: web-prod [tcp]",
-  "2026/02/04 10:12:15 [I] [proxy_manager.go:173] proxy added: ssh-dev [tcp]",
-  "2026/02/04 10:12:16 [I] [proxy_manager.go:173] proxy added: grafana [tcp]",
-  "2026/02/04 10:12:22 [I] [control.go:224] [web-prod] proxy status: online",
-  "2026/02/04 10:12:22 [I] [control.go:224] [ssh-dev] proxy status: online",
-  "2026/02/04 10:12:25 [W] [control.go:224] [grafana] proxy status: reconnecting",
-  "2026/02/04 10:12:33 [I] [control.go:148] ping server success, latency=23ms",
-  "2026/02/04 10:12:43 [I] [control.go:148] ping server success, latency=21ms",
-  "2026/02/04 10:12:53 [I] [control.go:148] ping server success, latency=24ms",
-  "2026/02/04 10:13:03 [I] [control.go:148] ping server success, latency=22ms",
-  "2026/02/04 10:13:13 [I] [control.go:148] ping server success, latency=23ms",
-  "2026/02/04 10:13:13 [I] [control.go:148] ping server success, latency=23ms",
-  "2026/02/04 10:13:13 [I] [control.go:148] ping server success, latency=23ms",
-  "2026/02/04 10:13:13 [I] [control.go:148] ping server success, latency=23ms",
-  "2026/02/04 10:13:13 [I] [control.go:148] ping server success, latency=23ms",
-  "2026/02/04 10:13:13 [I] [control.go:148] ping server success, latency=23ms",
-  "2026/02/04 10:13:13 [I] [control.go:148] ping server success, latency=23ms",
-  "2026/02/04 10:13:13 [I] [control.go:148] ping server success, latency=23ms",
-  "2026/02/04 10:13:13 [I] [control.go:148] ping server success, latency=23ms",
-  "2026/02/04 10:13:13 [I] [control.go:148] ping server success, latency=23ms",
-  "2026/02/04 10:13:13 [I] [control.go:148] ping server success, latency=23ms",
-]);
+const logs = ref<string[]>([]);
+const selectedTunnelName = ref("");
+const runtimeStatus = ref<RunnerRuntimeStatus>({
+  running: false,
+  pid: 0,
+  started_at: "",
+  node_address: "",
+  command: "",
+  last_error: "",
+  log_lines: [],
+});
 
+const isRunning = computed(() => runtimeStatus.value.running);
 const logText = computed(() => logs.value.join("\n"));
-const statusLabel = computed(() => (isRunning.value ? "运行中" : "已停止"));
-const statusColor = computed(() => (isRunning.value ? "success" : "error"));
+const statusLabel = computed(() => (isRunning.value ? "运行中" : "未运行"));
+const statusColor = computed(() => (isRunning.value ? "success" : "warning"));
+const activeTunnels = computed(() => {
+  if (!isRunning.value) {
+    return [] as typeof tunnels.value;
+  }
+  const activeName = (runtimeStatus.value.tunnel_name || selectedTunnelName.value || "").trim();
+  if (!activeName) {
+    return [] as typeof tunnels.value;
+  }
+  return tunnels.value.filter((tunnel) => tunnel.name === activeName);
+});
+
+const joinHostPort = (host: string, port?: number | null) => {
+  const normalizedHost = host.trim();
+  if (!normalizedHost) {
+    return "-";
+  }
+  if (!port || port <= 0) {
+    return normalizedHost;
+  }
+  return `${normalizedHost}:${port}`;
+};
+
+const formatRuntimeRemote = (tunnel: {
+  remote: string;
+  remotePort: number;
+}) => {
+  const runtimeNodeAddress = (runtimeStatus.value.node_address || "").trim();
+  if (!runtimeNodeAddress) {
+    return tunnel.remote;
+  }
+  return joinHostPort(runtimeNodeAddress, tunnel.remotePort);
+};
+
+const resolveRuntimeServer = (fallback: string) => {
+  const runtimeNodeAddress = (runtimeStatus.value.node_address || "").trim();
+  if (!runtimeNodeAddress) {
+    return fallback;
+  }
+  const activeName = (runtimeStatus.value.tunnel_name || selectedTunnelName.value || "").trim();
+  const activeTunnel = tunnels.value.find((item) => item.name === activeName);
+  return joinHostPort(runtimeNodeAddress, activeTunnel?.remotePort);
+};
+
+const statusToColor = (status: string) => {
+  const normalized = status.toLowerCase();
+  if (normalized.includes("run") || normalized.includes("online")) {
+    return "success";
+  }
+  if (normalized.includes("error") || normalized.includes("fail")) {
+    return "error";
+  }
+  if (normalized.includes("stop") || normalized.includes("offline")) {
+    return "grey";
+  }
+  return "info";
+};
+
+const statusToText = (status: string) => {
+  const normalized = status.toLowerCase();
+  if (normalized.includes("run") || normalized.includes("online")) {
+    return "在线";
+  }
+  if (normalized.includes("error") || normalized.includes("fail")) {
+    return "异常";
+  }
+  if (normalized.includes("stop") || normalized.includes("offline")) {
+    return "离线";
+  }
+  return status || "未知";
+};
+
+const loadRunnerData = async () => {
+  errorMessage.value = "";
+
+  await withGlobalLoading(async () => {
+    try {
+      const [runnerData, tunnelData, runnerRuntime] = await Promise.all([
+        getRunnerData(0),
+        getTunnelsOverview(1, 100, 2),
+        getRunnerRuntimeStatus(),
+      ]);
+      runtimeStatus.value = runnerRuntime;
+
+      const nodeMap = new Map<
+        number,
+        { ip_address: string; frps_port: number }
+      >();
+      for (const node of runnerData.nodes ?? []) {
+        nodeMap.set(Number(node.id), {
+          ip_address: node.ip_address || "-",
+          frps_port: Number(node.frps_port || 0),
+        });
+      }
+
+      const tunnelList = tunnelData.list ?? [];
+      tunnels.value = tunnelList.map((item) => {
+        const node = nodeMap.get(Number(item.node_id));
+        const remoteHost = node?.ip_address || "node";
+        const remotePort = item.remote_port || node?.frps_port || 0;
+
+        return {
+          name: item.name,
+          remark: item.remark || item.name,
+          local: `${item.local_ip}:${item.local_port}`,
+          remote: `${remoteHost}:${remotePort}`,
+          remotePort,
+          status: statusToText(item.status),
+          statusColor: statusToColor(item.status),
+        };
+      });
+      const currentTunnelName = runnerData.current_tunnel?.name || "";
+      const tunnelNames = new Set(tunnels.value.map((item) => item.name));
+      if (!tunnelNames.has(selectedTunnelName.value)) {
+        selectedTunnelName.value = tunnelNames.has(currentTunnelName)
+          ? currentTunnelName
+          : (tunnels.value[0]?.name ?? "");
+      }
+
+      const currentNode = runnerData.current_tunnel
+        ? nodeMap.get(Number(runnerData.current_tunnel.node_id))
+        : undefined;
+      const fallbackNodeAddress = currentNode
+        ? `${currentNode.ip_address}:${currentNode.frps_port || runnerData.current_tunnel?.remote_port || "-"}`
+        : runnerData.nodes?.[0]
+          ? `${runnerData.nodes[0].ip_address}:${runnerData.nodes[0].frps_port}`
+          : "-";
+
+      summary.value = {
+        server: resolveRuntimeServer(fallbackNodeAddress),
+        protocol: (runnerData.current_tunnel?.type || "-").toUpperCase(),
+        version: runnerData.version || "-",
+        pid: runtimeStatus.value.pid > 0 ? String(runtimeStatus.value.pid) : "-",
+        startTime: runtimeStatus.value.started_at
+          ? new Date(runtimeStatus.value.started_at).toLocaleString()
+          : "-",
+      };
+
+      const runtimeLines = runtimeStatus.value.log_lines || [];
+      logs.value =
+        runtimeLines.length > 0
+          ? runtimeLines
+          : ["暂无日志，点击“启动”后可查看 frpc 输出。"];
+    } catch (error) {
+      errorMessage.value =
+        error instanceof Error ? error.message : "加载 Runner 数据失败，请稍后重试";
+    }
+  });
+};
+
+const syncRuntimeStatus = async () => {
+  if (runtimePolling.value) {
+    return;
+  }
+  runtimePolling.value = true;
+  try {
+    const status = await getRunnerRuntimeStatus();
+    runtimeStatus.value = status;
+    const fallbackServer = summary.value.server;
+    summary.value = {
+      ...summary.value,
+      server: resolveRuntimeServer(fallbackServer),
+      pid: status.pid > 0 ? String(status.pid) : "-",
+      startTime: status.started_at
+        ? new Date(status.started_at).toLocaleString()
+        : "-",
+    };
+
+    const runtimeLines = status.log_lines || [];
+    logs.value =
+      runtimeLines.length > 0
+        ? runtimeLines
+        : ["暂无日志，点击“启动”后可查看 frpc 输出。"];
+  } finally {
+    runtimePolling.value = false;
+  }
+};
+
+const handleStartRunner = async () => {
+  errorMessage.value = "";
+  if (!selectedTunnelName.value) {
+    errorMessage.value = "请先选择隧道";
+    return;
+  }
+  runningAction.value = true;
+  try {
+    runtimeStatus.value = await startRunner(selectedTunnelName.value);
+    await loadRunnerData();
+  } catch (error) {
+    errorMessage.value =
+      error instanceof Error ? error.message : "启动 runner 失败，请稍后重试";
+  } finally {
+    runningAction.value = false;
+  }
+};
+
+const handleStopRunner = async () => {
+  errorMessage.value = "";
+  runningAction.value = true;
+  try {
+    runtimeStatus.value = await stopRunner();
+    await loadRunnerData();
+  } catch (error) {
+    errorMessage.value =
+      error instanceof Error ? error.message : "停止 runner 失败，请稍后重试";
+  } finally {
+    runningAction.value = false;
+  }
+};
+
+onMounted(() => {
+  void loadRunnerData();
+  runtimePollTimer = setInterval(() => {
+    void syncRuntimeStatus();
+  }, 1200);
+});
+
+onBeforeUnmount(() => {
+  if (runtimePollTimer) {
+    clearInterval(runtimePollTimer);
+    runtimePollTimer = null;
+  }
+});
 </script>
 
 <template>
+  <v-alert v-if="errorMessage" type="error" variant="tonal" class="mb-3">
+    {{ errorMessage }}
+  </v-alert>
+  <v-alert v-else-if="runtimeStatus.last_error" type="warning" variant="tonal" class="mb-3">
+    上次运行错误：{{ runtimeStatus.last_error }}
+  </v-alert>
+
   <v-card elevation="2" class="pa-6 mb-4">
     <div class="d-flex align-center justify-space-between flex-wrap ga-6">
       <div class="flex-grow-1">
         <div class="text-h5 font-weight-bold">LoliaCLI Runner</div>
         <div class="text-caption text-medium-emphasis">
-          已连接到 {{ summary.server }}（{{ summary.protocol.toUpperCase() }}）
+          已连接至 Runner {{ summary.server !== "-" ? `(${summary.server})` : "" }}（{{ summary.protocol }}）
         </div>
         <div class="d-flex flex-wrap ga-2 mt-3">
           <v-chip :color="statusColor" size="small" variant="tonal">
@@ -96,8 +312,27 @@ const statusColor = computed(() => (isRunning.value ? "success" : "error"));
       </div>
 
       <div class="d-flex flex-wrap ga-3">
-        <v-btn color="primary" prepend-icon="fas fa-stop"> 停止 </v-btn>
-        <v-btn variant="tonal" prepend-icon="fas fa-rotate"> 重启 </v-btn>
+        <v-btn
+          color="success"
+          prepend-icon="fas fa-play"
+          :loading="runningAction"
+          :disabled="isRunning || runningAction || !selectedTunnelName"
+          @click="handleStartRunner"
+        >
+          启动
+        </v-btn>
+        <v-btn
+          color="error"
+          prepend-icon="fas fa-stop"
+          :loading="runningAction"
+          :disabled="!isRunning || runningAction"
+          @click="handleStopRunner"
+        >
+          停止
+        </v-btn>
+        <v-btn color="primary" prepend-icon="fas fa-rotate" @click="loadRunnerData">
+          刷新
+        </v-btn>
       </div>
     </div>
   </v-card>
@@ -108,29 +343,37 @@ const statusColor = computed(() => (isRunning.value ? "success" : "error"));
         <v-card-title class="d-flex align-center justify-space-between">
           <div class="text-h6 font-weight-bold">隧道状态</div>
           <v-chip size="x-small" color="primary" variant="outlined">
-            {{ tunnels.length }} 条规则
+            {{ activeTunnels.length }} 条规则
           </v-chip>
         </v-card-title>
         <v-divider />
         <v-card-text class="d-flex flex-column ga-3 flex-grow-1 overflow-auto">
           <v-sheet
-            v-for="tunnel in tunnels"
-            :key="tunnel.name"
+            v-for="tunnel in activeTunnels"
+            :key="`${tunnel.name}-${tunnel.local}`"
             class="pa-3 d-flex align-center justify-space-between"
             rounded="lg"
             border
           >
             <div>
               <div class="text-subtitle-1 font-weight-bold">
-                {{ tunnel.name }}
+                {{ tunnel.remark }}
               </div>
               <div class="text-caption text-medium-emphasis">
-                {{ tunnel.local }} → {{ tunnel.remote }}
+                {{ tunnel.local }} → {{ formatRuntimeRemote(tunnel) }}
               </div>
             </div>
             <v-chip :color="tunnel.statusColor" size="x-small" variant="tonal">
               {{ tunnel.status }}
             </v-chip>
+          </v-sheet>
+          <v-sheet
+            v-if="activeTunnels.length === 0"
+            class="pa-4 text-caption text-medium-emphasis"
+            rounded="lg"
+            border
+          >
+            Runner 未运行，暂无已启动隧道。
           </v-sheet>
         </v-card-text>
       </v-card>
@@ -138,27 +381,12 @@ const statusColor = computed(() => (isRunning.value ? "success" : "error"));
 
     <v-col cols="12" md="8">
       <v-card elevation="2" class="h-100">
-        <v-card-title
-          class="d-flex align-center justify-space-between flex-wrap ga-4"
-        >
+        <v-card-title class="d-flex align-center justify-space-between flex-wrap ga-4">
           <div>
-            <div class="text-h6 font-weight-bold">LoliaCLI 输出</div>
+            <div class="text-h6 font-weight-bold">frpc 运行日志</div>
             <div class="text-caption text-medium-emphasis">
-              实时显示 LoliaCLI 的日志输出
+              启动命令：{{ runtimeStatus.command || "-" }}
             </div>
-          </div>
-          <div class="d-flex align-center ga-2">
-            <v-chip size="x-small" color="success" variant="tonal">
-              自动滚动：开
-            </v-chip>
-            <v-btn
-              variant="text"
-              size="small"
-              prepend-icon="fas fa-trash"
-              disabled
-            >
-              清空
-            </v-btn>
           </div>
         </v-card-title>
         <v-divider />
@@ -176,7 +404,6 @@ const statusColor = computed(() => (isRunning.value ? "success" : "error"));
     </v-col>
   </v-row>
 </template>
-
 <style scoped>
 .log-text-mono {
   font-family:

@@ -20,6 +20,11 @@ const routes = [
     path: '/runner',
     name: 'runner',
     component: () => import('@/pages/runner/index.vue')
+  },
+  {
+    path: '/settings',
+    name: 'settings',
+    component: () => import('@/pages/settings/index.vue')
   }
 ]
 
@@ -42,11 +47,15 @@ const hasOAuthToken = async () => {
 }
 
 router.beforeEach(async (to) => {
+  const ok = await hasOAuthToken()
+
   if (to.path === '/oauth') {
+    if (ok) {
+      return { path: '/', replace: true }
+    }
     return true
   }
 
-  const ok = await hasOAuthToken()
   if (!ok) {
     return { path: '/oauth', replace: true }
   }

@@ -1,0 +1,72 @@
+package models
+
+type GitHubRelease struct {
+	TagName     string               `json:"tag_name"`
+	Name        string               `json:"name"`
+	HTMLURL     string               `json:"html_url"`
+	PublishedAt string               `json:"published_at"`
+	Assets      []GitHubReleaseAsset `json:"assets"`
+}
+
+type GitHubReleaseAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+	Size               int64  `json:"size"`
+	ContentType        string `json:"content_type"`
+	Digest             string `json:"digest"`
+}
+
+type FrpcReleaseAsset struct {
+	Name          string `json:"name"`
+	DownloadURL   string `json:"download_url"`
+	ContentType   string `json:"content_type"`
+	Size          int64  `json:"size"`
+	Digest        string `json:"digest"`
+	SHA256        string `json:"sha256"`
+	OS            string `json:"os"`
+	Arch          string `json:"arch"`
+	ArchiveFormat string `json:"archive_format"`
+}
+
+type FrpcReleaseInfo struct {
+	TagName     string           `json:"tag_name"`
+	Name        string           `json:"name"`
+	HTMLURL     string           `json:"html_url"`
+	PublishedAt string           `json:"published_at"`
+	Asset       FrpcReleaseAsset `json:"asset"`
+}
+
+type FrpcInstalledInfo struct {
+	Version      string `json:"version"`
+	AssetName    string `json:"asset_name"`
+	SHA256       string `json:"sha256"`
+	InstalledAt  string `json:"installed_at"`
+	BinaryPath   string `json:"binary_path"`
+	BinaryExists bool   `json:"binary_exists"`
+}
+
+type FrpcPaths struct {
+	UserDataDir  string `json:"userdata_dir"`
+	FrpcDir      string `json:"frpc_dir"`
+	BinDir       string `json:"bin_dir"`
+	BinaryPath   string `json:"binary_path"`
+	DownloadDir  string `json:"download_dir"`
+	StatePath    string `json:"state_path"`
+	SettingsPath string `json:"settings_path"`
+}
+
+type FrpcStatus struct {
+	GOOS            string             `json:"goos"`
+	GOARCH          string             `json:"goarch"`
+	Paths           FrpcPaths          `json:"paths"`
+	GitHubMirrorURL string             `json:"github_mirror_url"`
+	Installed       *FrpcInstalledInfo `json:"installed,omitempty"`
+	Latest          *FrpcReleaseInfo   `json:"latest,omitempty"`
+	UpdateAvailable bool               `json:"update_available"`
+	LatestError     string             `json:"latest_error,omitempty"`
+}
+
+type FrpcInstallResult struct {
+	Release FrpcReleaseInfo `json:"release"`
+	Status  FrpcStatus      `json:"status"`
+}

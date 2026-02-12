@@ -38,6 +38,8 @@ func main() {
 	// Create an instance of the app structure
 	app := backend.NewApp(configManager)
 	tokenService := services.NewTokenService()
+	centerService := services.NewCenterService()
+	frpcService := services.NewFrpcService()
 
 	// Create application with options
 	err := wails.Run(&options.App{
@@ -56,6 +58,8 @@ func main() {
 			app,
 			prefSvc,
 			tokenService,
+			centerService,
+			frpcService,
 		},
 	})
 

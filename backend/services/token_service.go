@@ -12,3 +12,16 @@ func NewTokenService() *TokenService {
 func (s *TokenService) HasOAuthToken() (bool, error) {
 	return HasOAuthToken()
 }
+
+// BeginOAuthLogin starts OAuth2 Authorization Code login and stores token in keyring.
+func (s *TokenService) BeginOAuthLogin(clientID string, scope string) (bool, error) {
+	if err := beginOAuthLogin(clientID, scope); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// ClearOAuthToken removes OAuth token from keyring.
+func (s *TokenService) ClearOAuthToken() error {
+	return ClearOAuthToken()
+}
