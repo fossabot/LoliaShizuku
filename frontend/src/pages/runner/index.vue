@@ -296,16 +296,16 @@ onBeforeUnmount(() => {
           已连接至 Runner {{ summary.server !== "-" ? `(${summary.server})` : "" }}（{{ summary.protocol }}）
         </div>
         <div class="d-flex flex-wrap ga-2 mt-3">
-          <v-chip :color="statusColor" size="small" variant="tonal">
+          <v-chip :color="statusColor" size="small" variant="tonal" class="rounded-pill">
             {{ statusLabel }}
           </v-chip>
-          <v-chip color="primary" size="small" variant="outlined">
+          <v-chip color="primary" size="small" variant="outlined" class="rounded-pill">
             PID {{ summary.pid }}
           </v-chip>
-          <v-chip color="info" size="small" variant="outlined">
+          <v-chip color="info" size="small" variant="outlined" class="rounded-pill">
             {{ summary.version }}
           </v-chip>
-          <v-chip color="secondary" size="small" variant="outlined">
+          <v-chip color="secondary" size="small" variant="outlined" class="rounded-pill">
             启动于 {{ summary.startTime }}
           </v-chip>
         </div>
