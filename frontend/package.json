@@ -17,6 +17,7 @@
     "tailwindcss": "^4.1.18",
     "unplugin-fonts": "^1.4.0",
     "vue": "^3.2.37",
+    "pinia": "^3.0.3",
     "vue-router": "4",
     "vuetify": "^3.11.7"
   },

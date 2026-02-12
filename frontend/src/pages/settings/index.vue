@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { useGlobalLoading } from "@/composables/globalLoading";
+import { storeToRefs } from "pinia";
+import { useGlobalLoadingStore } from "@/stores/globalLoading";
+import { useFrpcInstallStore } from "@/stores/frpcInstall";
 import {
   getFrpcStatus,
-  installOrUpdateFrpc,
   removeFrpc,
   setGitHubMirrorURL,
   type FrpcStatus,
@@ -15,21 +16,25 @@ defineOptions({
 
 const status = ref<FrpcStatus | null>(null);
 const activePanel = ref<"frpc">("frpc");
-const installingDialog = ref(false);
 const snackbar = ref(false);
 const snackbarText = ref("");
 const snackbarColor = ref<"success" | "error" | "info">("info");
 const githubMirrorURLInput = ref("");
-const builtinMirrorURL = "https://cdn.akaere.com/github.com";
+const builtinMirrorURL = "https://cdn.akaere.online/github.com";
 type MirrorMode = "official" | "builtin" | "custom";
 const mirrorMode = ref<MirrorMode>("official");
 const mirrorModeItems = [
   { title: "github.com", value: "official" as const },
-  { title: "cdn.akaere.com/github.com", value: "builtin" as const },
+  { title: "cdn.akaere.online/github.com", value: "builtin" as const },
   { title: "自定义网址", value: "custom" as const },
 ];
 
-const { withGlobalLoading } = useGlobalLoading();
+const globalLoadingStore = useGlobalLoadingStore();
+const withGlobalLoading = <T>(task: () => Promise<T>) =>
+  globalLoadingStore.withGlobalLoading(task);
+const frpcInstallStore = useFrpcInstallStore();
+const { installing, canceling } = storeToRefs(frpcInstallStore);
+const { startInstall, cancelInstall } = frpcInstallStore;
 
 const showMessage = (
   text: string,
@@ -90,17 +95,33 @@ const loadStatus = async () => {
 };
 
 const handleInstallOrUpdate = async () => {
-  installingDialog.value = true;
   try {
     await withGlobalLoading(async () => {
-      const result = await installOrUpdateFrpc();
+      const result = await startInstall();
       status.value = result.status;
       showMessage(`frpc 已安装到 ${result.status.paths.binary_path}`, "success");
     });
   } catch (error) {
-    showMessage(error instanceof Error ? error.message : "安装/更新 frpc 失败", "error");
-  } finally {
-    installingDialog.value = false;
+    const message = error instanceof Error ? error.message : "安装/更新 frpc 失败";
+    if (message.includes("已终止")) {
+      showMessage(message, "info");
+      await loadStatus();
+      return;
+    }
+    showMessage(message, "error");
+  }
+};
+
+const handleCancelInstall = async () => {
+  if (!installing.value || canceling.value) {
+    return;
+  }
+
+  try {
+    await cancelInstall();
+    showMessage("已发送终止下载请求", "info");
+  } catch (error) {
+    showMessage(error instanceof Error ? error.message : "终止下载失败", "error");
   }
 };
 
@@ -189,17 +210,27 @@ onMounted(() => {
             <div class="d-flex flex-wrap ga-3">
               <v-btn
                 color="primary"
-                :loading="installingDialog"
-                :disabled="installingDialog"
+                :loading="installing"
+                :disabled="installing"
                 @click="handleInstallOrUpdate"
               >
                 <v-icon start>fas fa-download</v-icon>
                 {{ actionText }}
               </v-btn>
               <v-btn
+                color="warning"
+                variant="tonal"
+                :loading="canceling"
+                :disabled="!installing || canceling"
+                @click="handleCancelInstall"
+              >
+                <v-icon start>fas fa-stop</v-icon>
+                终止下载
+              </v-btn>
+              <v-btn
                 color="info"
                 variant="tonal"
-                :disabled="installingDialog"
+                :disabled="installing"
                 @click="loadStatus"
               >
                 <v-icon start>fas fa-rotate</v-icon>
@@ -208,7 +239,7 @@ onMounted(() => {
               <v-btn
                 color="error"
                 variant="tonal"
-                :disabled="installingDialog"
+                :disabled="installing"
                 @click="handleRemove"
               >
                 <v-icon start>fas fa-trash</v-icon>
@@ -284,20 +315,20 @@ onMounted(() => {
                 item-title="title"
                 item-value="value"
                 hide-details="auto"
-                :disabled="installingDialog"
+                :disabled="installing"
               />
               <v-text-field
                 v-if="mirrorMode === 'custom'"
                 v-model="githubMirrorURLInput"
                 hide-details="auto"
                 placeholder="https://example.com/github.com"
-                :disabled="installingDialog"
+                :disabled="installing"
               />
               <div class="d-flex flex-wrap ga-2">
                 <v-btn
                   color="primary"
                   variant="tonal"
-                  :disabled="installingDialog"
+                  :disabled="installing"
                   @click="handleSaveMirrorURL"
                 >
                   保存设置
@@ -305,7 +336,7 @@ onMounted(() => {
                 <v-btn
                   color="secondary"
                   variant="text"
-                  :disabled="installingDialog"
+                  :disabled="installing"
                   @click="handleClearMirrorURL"
                 >
                   使用 github.com

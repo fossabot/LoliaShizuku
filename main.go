@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 
 	"loliashizuku/backend"
@@ -54,6 +55,13 @@ func main() {
 			Assets: assets,
 		},
 		OnStartup: app.Startup,
+		OnBeforeClose: func(ctx context.Context) bool {
+			_, _ = centerService.StopRunner()
+			return false
+		},
+		OnShutdown: func(ctx context.Context) {
+			_, _ = centerService.StopRunner()
+		},
 		Bind: []interface{}{
 			app,
 			prefSvc,

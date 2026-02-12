@@ -9,7 +9,7 @@ import {
   type TunnelOverviewItem,
 } from "@/services/center";
 import { BrowserOpenURL } from "../../../wailsjs/runtime/runtime";
-import { useGlobalLoading } from "@/composables/globalLoading";
+import { useGlobalLoadingStore } from "@/stores/globalLoading";
 
 defineOptions({
   name: "TunnelsPage",
@@ -18,7 +18,9 @@ defineOptions({
 const errorMessage = ref("");
 const searchQuery = ref("");
 const tunnels = ref<TunnelOverviewItem[]>([]);
-const { withGlobalLoading } = useGlobalLoading();
+const globalLoadingStore = useGlobalLoadingStore();
+const withGlobalLoading = <T>(task: () => Promise<T>) =>
+  globalLoadingStore.withGlobalLoading(task);
 const router = useRouter();
 const runnerStatus = ref<RunnerRuntimeStatus>({
   running: false,

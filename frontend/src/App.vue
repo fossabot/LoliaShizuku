@@ -1,9 +1,9 @@
 <script lang="ts" setup>
 import AppHeader from "./components/AppHeader.vue";
 import FloatingActionButton from "./components/FloatingActionButton.vue";
-import { useGlobalLoading } from "@/composables/globalLoading";
+import { useGlobalLoadingStore } from "@/stores/globalLoading";
 
-const { isLoading } = useGlobalLoading();
+const globalLoadingStore = useGlobalLoadingStore();
 </script>
 
 <template>
@@ -12,7 +12,7 @@ const { isLoading } = useGlobalLoading();
       <AppHeader style="--wails-draggable: drag" />
       <div class="app-content-scroll">
         <v-progress-linear
-          :active="isLoading"
+          :active="globalLoadingStore.isLoading"
           indeterminate
           color="primary"
           class="app-global-loading-bar"

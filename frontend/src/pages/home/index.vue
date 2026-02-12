@@ -14,7 +14,7 @@ import {
   getTrafficDaily,
   type DailyTrafficResponse,
 } from "@/services/center";
-import { useGlobalLoading } from "@/composables/globalLoading";
+import { useGlobalLoadingStore } from "@/stores/globalLoading";
 
 defineOptions({
   name: "HomePage",
@@ -32,7 +32,9 @@ type DataRecord = {
 };
 
 const errorMessage = ref("");
-const { withGlobalLoading } = useGlobalLoading();
+const globalLoadingStore = useGlobalLoadingStore();
+const withGlobalLoading = <T>(task: () => Promise<T>) =>
+  globalLoadingStore.withGlobalLoading(task);
 
 const userInfo = ref({
   name: "-",

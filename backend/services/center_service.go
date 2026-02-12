@@ -277,6 +277,7 @@ func (s *CenterService) StartRunner(tunnelName string) (*models.RunnerRuntimeSta
 
 	runCtx, runCancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(runCtx, binaryPath, "-t", tokenArg)
+	configureBackgroundProcess(cmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

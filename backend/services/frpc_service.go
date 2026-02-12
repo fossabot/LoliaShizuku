@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"loliashizuku/backend/api"
@@ -70,6 +71,9 @@ type FrpcService struct {
 	httpClient *http.Client
 	repoOwner  string
 	repoName   string
+
+	installMu     sync.Mutex
+	installCancel context.CancelFunc
 }
 
 func NewFrpcService() *FrpcService {
@@ -99,26 +103,29 @@ func (s *FrpcService) GetFrpcStatus() (*models.FrpcStatus, error) {
 }
 
 func (s *FrpcService) InstallOrUpdateFrpc() (*models.FrpcInstallResult, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), defaultFrpcInstallTimeout)
-	defer cancel()
+	ctx, err := s.beginInstall()
+	if err != nil {
+		return nil, err
+	}
+	defer s.endInstall()
 
 	latest, err := s.resolveLatestRelease(ctx)
 	if err != nil {
-		return nil, err
+		return nil, normalizeInstallError(err)
 	}
 
 	paths, err := s.paths()
 	if err != nil {
-		return nil, err
+		return nil, normalizeInstallError(err)
 	}
 	if err := ensureDirs(paths.FrpcDir, paths.BinDir, paths.DownloadDir); err != nil {
-		return nil, err
+		return nil, normalizeInstallError(err)
 	}
 
 	archivePath := filepath.Join(paths.DownloadDir, latest.Asset.Name)
 	downloadedSHA256, err := s.downloadArchive(ctx, latest.Asset.DownloadURL, archivePath)
 	if err != nil {
-		return nil, err
+		return nil, normalizeInstallError(err)
 	}
 
 	expectedSHA256 := strings.ToLower(strings.TrimSpace(latest.Asset.SHA256))
@@ -131,7 +138,7 @@ func (s *FrpcService) InstallOrUpdateFrpc() (*models.FrpcInstallResult, error) {
 
 	binaryName := filepath.Base(paths.BinaryPath)
 	if err := extractBinaryFromArchive(archivePath, latest.Asset.ArchiveFormat, binaryName, paths.BinaryPath); err != nil {
-		return nil, err
+		return nil, normalizeInstallError(err)
 	}
 
 	state := frpcInstallState{
@@ -146,21 +153,32 @@ func (s *FrpcService) InstallOrUpdateFrpc() (*models.FrpcInstallResult, error) {
 	}
 
 	if err := saveInstallState(paths.StatePath, state); err != nil {
-		return nil, err
+		return nil, normalizeInstallError(err)
 	}
 	if err := removeIfExists(archivePath); err != nil {
-		return nil, err
+		return nil, normalizeInstallError(err)
 	}
 
 	status, err := s.buildStatus(ctx, false, latest)
 	if err != nil {
-		return nil, err
+		return nil, normalizeInstallError(err)
 	}
 
 	return &models.FrpcInstallResult{
 		Release: *latest,
 		Status:  *status,
 	}, nil
+}
+
+func (s *FrpcService) CancelInstallOrUpdateFrpc() error {
+	s.installMu.Lock()
+	cancel := s.installCancel
+	s.installMu.Unlock()
+	if cancel == nil {
+		return nil
+	}
+	cancel()
+	return nil
 }
 
 func (s *FrpcService) RemoveFrpc() error {
@@ -357,13 +375,16 @@ func (s *FrpcService) downloadArchive(ctx context.Context, url string, outputPat
 	hasher := sha256.New()
 	if _, err := io.Copy(io.MultiWriter(file, hasher), resp.Body); err != nil {
 		_ = file.Close()
+		_ = os.Remove(tempPath)
 		return "", fmt.Errorf("write archive file: %w", err)
 	}
 	if err := file.Close(); err != nil {
+		_ = os.Remove(tempPath)
 		return "", fmt.Errorf("close archive file: %w", err)
 	}
 
 	if err := os.Rename(tempPath, outputPath); err != nil {
+		_ = os.Remove(tempPath)
 		return "", fmt.Errorf("rename archive file: %w", err)
 	}
 
@@ -603,6 +624,7 @@ func frpcBinaryName() string {
 
 func detectFrpcVersion(ctx context.Context, binaryPath string) (string, error) {
 	cmd := exec.CommandContext(ctx, binaryPath, "-v")
+	configureBackgroundProcess(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("run frpc -v: %w", err)
@@ -736,6 +758,43 @@ func parseSHA256Digest(raw string) string {
 		}
 	}
 	return digest
+}
+
+func (s *FrpcService) beginInstall() (context.Context, error) {
+	s.installMu.Lock()
+	defer s.installMu.Unlock()
+
+	if s.installCancel != nil {
+		return nil, fmt.Errorf("frpc 下载/安装正在进行中")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultFrpcInstallTimeout)
+	s.installCancel = cancel
+	return ctx, nil
+}
+
+func (s *FrpcService) endInstall() {
+	s.installMu.Lock()
+	cancel := s.installCancel
+	s.installCancel = nil
+	s.installMu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func normalizeInstallError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.Canceled) {
+		return fmt.Errorf("frpc 下载已终止")
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("frpc 下载超时，请稍后重试")
+	}
+	return err
 }
 
 func removeIfExists(path string) error {

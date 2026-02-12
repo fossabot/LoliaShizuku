@@ -8,14 +8,16 @@ import {
   stopRunner,
   type RunnerRuntimeStatus,
 } from "@/services/center";
-import { useGlobalLoading } from "@/composables/globalLoading";
+import { useGlobalLoadingStore } from "@/stores/globalLoading";
 
 defineOptions({
   name: "RunnerPage",
 });
 
 const errorMessage = ref("");
-const { withGlobalLoading } = useGlobalLoading();
+const globalLoadingStore = useGlobalLoadingStore();
+const withGlobalLoading = <T>(task: () => Promise<T>) =>
+  globalLoadingStore.withGlobalLoading(task);
 const runningAction = ref(false);
 const runtimePolling = ref(false);
 let runtimePollTimer: ReturnType<typeof setInterval> | null = null;

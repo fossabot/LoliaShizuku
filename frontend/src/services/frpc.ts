@@ -2,6 +2,7 @@ type FrpcServiceBinding = {
   GetFrpcStatus: () => Promise<any>;
   GetGitHubMirrorURL: () => Promise<string>;
   InstallOrUpdateFrpc: () => Promise<any>;
+  CancelInstallOrUpdateFrpc: () => Promise<void>;
   RemoveFrpc: () => Promise<void>;
   SetGitHubMirrorURL: (url: string) => Promise<void>;
 };
@@ -107,6 +108,15 @@ export async function installOrUpdateFrpc(): Promise<FrpcInstallResult> {
   try {
     const svc = getFrpcServiceBinding();
     return (await svc.InstallOrUpdateFrpc()) as FrpcInstallResult;
+  } catch (error) {
+    throw parseError(error);
+  }
+}
+
+export async function cancelInstallOrUpdateFrpc(): Promise<void> {
+  try {
+    const svc = getFrpcServiceBinding();
+    await svc.CancelInstallOrUpdateFrpc();
   } catch (error) {
     throw parseError(error);
   }
