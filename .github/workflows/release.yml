@@ -1,0 +1,117 @@
+name: Release Build
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+env:
+  CGO_ENABLED: 1
+  WAILS_SKIP_UPDATE_CHECK: 1
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-latest
+            artifact_os: linux
+          - name: windows
+            os: windows-latest
+            artifact_os: windows
+          - name: macos
+            os: macos-latest
+            artifact_os: macos
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libappindicator3-dev patchelf
+          if apt-cache show libwebkit2gtk-4.1-dev >/dev/null 2>&1; then
+            sudo apt-get install -y libwebkit2gtk-4.1-dev
+          else
+            sudo apt-get install -y libwebkit2gtk-4.0-dev
+          fi
+
+      - name: Install Wails CLI
+        shell: bash
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Build app
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          COMMIT="$(git rev-parse --short=12 HEAD)"
+          BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${TAG}" == v* ]]; then
+            VERSION="${TAG#v}"
+          else
+            VERSION="dev-${COMMIT}"
+          fi
+
+          LDFLAGS="-X loliashizuku/backend/version.Version=${VERSION} -X loliashizuku/backend/version.GitCommit=${COMMIT} -X loliashizuku/backend/version.GitBranch=${TAG} -X loliashizuku/backend/version.BuildTime=${BUILD_TIME}"
+
+          wails build -clean -ldflags "$LDFLAGS"
+
+      - name: Package artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          REF_SAFE="$(echo "${GITHUB_REF_NAME}" | sed 's#[^A-Za-z0-9._-]#-#g')"
+          ARCHIVE="LoliaShizuku-${REF_SAFE}-${{ matrix.artifact_os }}-x64.tar.gz"
+          tar -czf "dist/${ARCHIVE}" -C build/bin .
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.artifact_os }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: artifacts/**/*.tar.gz
