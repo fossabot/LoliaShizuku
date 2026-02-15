@@ -1,16 +1,14 @@
 # LoliaShizuku
 
-LoliaShizuku 是一个基于 Wails + Vue 3 + TypeScript 的 Lolia FRP 第三方桌面客户端。
+「ロリア・雫」由 Wails 驱动的 Lolia FRP 第三方客户端
 
 ## 功能概览
 
-- OAuth 登录（系统浏览器授权 + 本地回调）
-- Access Token 过期后自动使用 Refresh Token 刷新
+- OAuth 登录
 - 控制台数据看板（用户信息、流量、隧道、版本）
 - 隧道列表与流量概览
 - 本地 Runner 启停与日志查看
 - 内置 frpc 安装/更新/移除
-- 支持设置 GitHub 下载镜像地址
 
 ## 技术栈
 
@@ -26,7 +24,7 @@ LoliaShizuku 是一个基于 Wails + Vue 3 + TypeScript 的 Lolia FRP 第三方�
 安装 Wails CLI：
 
 ```bash
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
+go install github.com/wailsapp/wails/v2/cmd/wails@latest
 ```
 
 ## 本地开发
@@ -57,38 +55,24 @@ wails build
 
 ## OAuth 与认证说明
 
-- Token 存储在系统 Keyring（service: `LoliaShizuku`, key: `oauth_token`）
-- 每次调用中心 API 前会检查 token：
-  - 未过期：直接使用
-  - 已过期且存在 `refresh_token`：自动刷新并回写 Keyring
-  - 刷新失败或未授权：清理本地 token，并在路由守卫中回到 `/oauth`
+Token 存储在系统 Keyring（service: `LoliaShizuku`, key: `oauth_token`）
 
 默认 OAuth 回调地址为 `http://localhost:1145`。
 
 ## 配置项（环境变量）
 
-### Center API
-
-- `LOLIA_CENTER_API_BASE_URL`：中心 API 基地址  
-  默认：`https://api.lolia.link/api/v1`
-- `LOLIA_HTTP_USER_AGENT`：自定义请求 UA（可选）
-
-### OAuth
-
-- `LOLIA_OAUTH_CLIENT_ID`
-- `LOLIA_OAUTH_CLIENT_SECRET`
-- `LOLIA_OAUTH_AUTHORIZE_URL`  
-  默认：`https://dash.lolia.link/oauth/authorize`
-- `LOLIA_OAUTH_TOKEN_URL`  
-  默认：`https://api.lolia.link/api/v1/oauth2/token`
-- `LOLIA_OAUTH_REDIRECT_URL`  
-  默认：`http://localhost:1145`
-- `LOLIA_OAUTH_USE_PKCE`（默认开启；设置为 `0/false/no/off` 可关闭）
-
-### frpc Release 源
-
-- `LOLIA_FRPC_REPO_OWNER`（默认：`Lolia-FRP`）
-- `LOLIA_FRPC_REPO_NAME`（默认：`lolia-frp`）
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `LOLIA_CENTER_API_BASE_URL` | 中心 API 基地址 | `https://api.lolia.link/api/v1` |
+| `LOLIA_HTTP_USER_AGENT` | 自定义请求 UA | — |
+| `LOLIA_OAUTH_CLIENT_ID` | OAuth Client ID | — |
+| `LOLIA_OAUTH_CLIENT_SECRET` | OAuth Client Secret | — |
+| `LOLIA_OAUTH_AUTHORIZE_URL` | OAuth 授权地址 | `https://dash.lolia.link/oauth/authorize` |
+| `LOLIA_OAUTH_TOKEN_URL` | OAuth Token 地址 | `https://api.lolia.link/api/v1/oauth2/token` |
+| `LOLIA_OAUTH_REDIRECT_URL` | OAuth 回调地址 | `http://localhost:1145` |
+| `LOLIA_OAUTH_USE_PKCE` | 启用 PKCE（`0/false/no/off` 关闭） | 开启 |
+| `LOLIA_FRPC_REPO_OWNER` | frpc Release 仓库 Owner | `Lolia-FRP` |
+| `LOLIA_FRPC_REPO_NAME` | frpc Release 仓库名 | `lolia-frp` |
 
 ## frpc 本地目录
 
@@ -99,14 +83,11 @@ frpc 安装在 `os.UserConfigDir()/LoliaShizuku/userdata/frpc/` 下，主要包�
 - `installed.json`：安装状态
 - `settings.json`：下载镜像设置
 
-## 发布流程（GitHub Actions）
-
-- Workflow：`.github/workflows/release.yml`
-- 触发条件：
-  - 任意分支 push：执行多平台构建
-  - 推送 `v*` tag：构建并创建 GitHub Release
-- Release Notes：由 workflow 在发布时根据 commit 自动生成（基于前一个 tag 到当前 tag 的 `git log`）
-
 ## 许可证
 
-本项目使用 `LICENSE` 中声明的许可证。
+本项目使用 `MIT` 许可证开源
+
+## 感谢
+[LoliaFRP-CLI](https://github.com/Lolia-FRP/lolia-frp)
+
+[FRP](https://github.com/fatedier/frp)
