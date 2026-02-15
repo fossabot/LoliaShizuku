@@ -1,4 +1,6 @@
 # LoliaShizuku
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FMxmilu666%2FLoliaShizuku.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FMxmilu666%2FLoliaShizuku?ref=badge_shield)
+
 
 「ロリア・雫」由 Wails 驱动的 Lolia FRP 第三方客户端
 
@@ -91,3 +93,6 @@ frpc 安装在 `os.UserConfigDir()/LoliaShizuku/userdata/frpc/` 下，主要包�
 [LoliaFRP-CLI](https://github.com/Lolia-FRP/lolia-frp)
 
 [FRP](https://github.com/fatedier/frp)
+
+## License
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FMxmilu666%2FLoliaShizuku.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2FMxmilu666%2FLoliaShizuku?ref=badge_large)
