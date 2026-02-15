@@ -69,40 +69,15 @@ func centerAPIBaseURL() string {
 }
 
 func (s *CenterService) getValidAccessToken(ctx context.Context) (string, error) {
-	token, err := LoadOAuthToken()
-	if err != nil {
-		return "", fmt.Errorf("load oauth token: %w", err)
-	}
-
-	if token == nil || strings.TrimSpace(token.AccessToken) == "" {
-		return "", fmt.Errorf("oauth token is empty")
-	}
-	if token.Valid() {
-		return token.AccessToken, nil
-	}
-
-	if strings.TrimSpace(token.RefreshToken) == "" {
-		return "", fmt.Errorf("oauth access token expired and no refresh token available")
-	}
-
-	oauthCfg, cfgErr := resolveOAuthConfig("", "")
-	if cfgErr != nil {
-		return "", fmt.Errorf("load oauth config for refresh: %w", cfgErr)
-	}
-
 	refreshCtx, cancel := context.WithTimeout(ctx, defaultHTTPTimeout)
 	defer cancel()
 
-	refreshedToken, refreshErr := oauthCfg.TokenSource(refreshCtx, token).Token()
-	if refreshErr != nil {
-		return "", fmt.Errorf("refresh oauth token: %w", refreshErr)
+	token, err := loadOrRefreshOAuthToken(refreshCtx)
+	if err != nil {
+		return "", err
 	}
 
-	if saveErr := SaveOAuthToken(refreshedToken); saveErr != nil {
-		return "", fmt.Errorf("save refreshed oauth token: %w", saveErr)
-	}
-
-	return refreshedToken.AccessToken, nil
+	return token.AccessToken, nil
 }
 
 func (s *CenterService) GetDashboard() (*models.CenterDashboardData, error) {

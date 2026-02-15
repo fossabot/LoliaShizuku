@@ -1,5 +1,12 @@
 package services
 
+import (
+	"context"
+	"errors"
+
+	"github.com/zalando/go-keyring"
+)
+
 // TokenService exposes token helpers to the frontend via Wails binding.
 type TokenService struct{}
 
@@ -10,12 +17,20 @@ func NewTokenService() *TokenService {
 
 // HasOAuthToken checks whether an OAuth token exists in the system keyring.
 func (s *TokenService) HasOAuthToken() (bool, error) {
-	return HasOAuthToken()
+	ctx := context.Background()
+	token, err := loadOrRefreshOAuthToken(ctx)
+	if err == nil {
+		return token != nil, nil
+	}
+	if errors.Is(err, keyring.ErrNotFound) {
+		return false, nil
+	}
+	return false, err
 }
 
 // BeginOAuthLogin starts OAuth2 Authorization Code login and stores token in keyring.
-func (s *TokenService) BeginOAuthLogin(clientID string, scope string) (bool, error) {
-	if err := beginOAuthLogin(clientID, scope); err != nil {
+func (s *TokenService) BeginOAuthLogin() (bool, error) {
+	if err := beginOAuthLogin(); err != nil {
 		return false, err
 	}
 	return true, nil

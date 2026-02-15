@@ -44,7 +44,7 @@ async function handleLogin() {
       throw new Error("后端 OAuth 服务未就绪，请重启应用。");
     }
 
-    const ok = await tokenService.BeginOAuthLogin("", "");
+    const ok = await tokenService.BeginOAuthLogin();
 
     if (!ok) {
       throw new Error("OAuth 授权失败，请重试。");

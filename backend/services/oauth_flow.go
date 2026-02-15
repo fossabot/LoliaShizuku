@@ -44,11 +44,8 @@ func shouldUsePKCE() bool {
 	}
 }
 
-func resolveOAuthConfig(clientID, scope string) (*oauth2.Config, error) {
-	resolvedClientID := strings.TrimSpace(clientID)
-	if resolvedClientID == "" {
-		resolvedClientID = strings.TrimSpace(os.Getenv("LOLIA_OAUTH_CLIENT_ID"))
-	}
+func resolveOAuthConfig() (*oauth2.Config, error) {
+	resolvedClientID := strings.TrimSpace(os.Getenv("LOLIA_OAUTH_CLIENT_ID"))
 	if resolvedClientID == "" {
 		resolvedClientID = defaultOAuthClientID
 	}
@@ -94,8 +91,8 @@ func randomURLSafeString(size int) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
-func beginOAuthLogin(clientID, scope string) error {
-	oauthCfg, err := resolveOAuthConfig(clientID, scope)
+func beginOAuthLogin() error {
+	oauthCfg, err := resolveOAuthConfig()
 	if err != nil {
 		return err
 	}
