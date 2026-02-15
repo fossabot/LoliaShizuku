@@ -1,0 +1,17 @@
+name: loliashizuku
+arch: __NFPM_ARCH__
+platform: linux
+version: __PKG_VERSION__
+release: __PKG_RELEASE__
+section: default
+priority: optional
+maintainer: Mxmilu666 <mxmilu666@gmail.com>
+description: LoliaShizuku desktop client for Lolia FRP.
+vendor: LoliaShizuku
+homepage: __HOMEPAGE__
+license: MIT
+contents:
+  - src: __BIN_PATH__
+    dst: /usr/local/bin/LoliaShizuku
+    file_info:
+      mode: 0755
