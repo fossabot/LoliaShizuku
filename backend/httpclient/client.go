@@ -12,7 +12,6 @@ import (
 	"os"
 	"strings"
 
-	"loliashizuku/backend/models"
 	"loliashizuku/backend/version"
 )
 
@@ -45,6 +44,13 @@ type Client struct {
 	onUnauthorized func(ctx context.Context) error
 }
 
+type envelopeProbe struct {
+	Code   int             `json:"code"`
+	Status int             `json:"status"`
+	Msg    string          `json:"msg"`
+	Data   json.RawMessage `json:"data"`
+}
+
 func ResolveUserAgent(userAgent string) string {
 	resolved := strings.TrimSpace(userAgent)
 	if resolved == "" {
@@ -58,10 +64,14 @@ func ResolveUserAgent(userAgent string) string {
 
 func New(options Options) *Client {
 	userAgent := ResolveUserAgent(options.UserAgent)
+	httpClient := options.HTTPClient
+	if httpClient == nil {
+		httpClient = &http.Client{}
+	}
 
 	return &Client{
 		baseURL:        strings.TrimRight(strings.TrimSpace(options.BaseURL), "/"),
-		httpClient:     options.HTTPClient,
+		httpClient:     httpClient,
 		userAgent:      userAgent,
 		getAccessToken: options.GetAccessToken,
 		onUnauthorized: options.OnUnauthorized,
@@ -126,16 +136,29 @@ func (c *Client) DoJSON(
 		return fmt.Errorf("read response body for %s: %w", path, readErr)
 	}
 
-	var envelope models.APIEnvelope
+	var probe envelopeProbe
+	probeParsed := false
 	if len(payload) > 0 {
-		if err := json.Unmarshal(payload, &envelope); err != nil {
-			return fmt.Errorf("decode response for %s: %w", path, err)
+		if err := json.Unmarshal(payload, &probe); err == nil {
+			probeParsed = true
 		}
 	}
 
-	businessCode := envelope.Code
-	if businessCode == 0 {
-		businessCode = envelope.Status
+	isEnvelope := probeParsed && hasEnvelopeShape(payload)
+	businessCode := 0
+	message := ""
+	if isEnvelope {
+		businessCode = probe.Code
+		if businessCode == 0 {
+			businessCode = probe.Status
+		}
+		message = strings.TrimSpace(probe.Msg)
+	} else if probeParsed {
+		message = firstNonEmpty(readRawStringField(payload, "msg"), readRawStringField(payload, "message"), readRawStringField(payload, "error"))
+	}
+
+	if message == "" && len(payload) > 0 {
+		message = strings.TrimSpace(string(payload))
 	}
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden ||
@@ -147,7 +170,7 @@ func (c *Client) DoJSON(
 			Path:       path,
 			StatusCode: resp.StatusCode,
 			Code:       businessCode,
-			Message:    envelope.Msg,
+			Message:    message,
 		}
 		return errors.Join(ErrUnauthorized, apiErr)
 	}
@@ -157,7 +180,7 @@ func (c *Client) DoJSON(
 			Path:       path,
 			StatusCode: resp.StatusCode,
 			Code:       businessCode,
-			Message:    envelope.Msg,
+			Message:    message,
 		}
 	}
 
@@ -166,18 +189,67 @@ func (c *Client) DoJSON(
 			Path:       path,
 			StatusCode: resp.StatusCode,
 			Code:       businessCode,
-			Message:    envelope.Msg,
+			Message:    message,
 		}
 	}
 
 	if dest == nil {
 		return nil
 	}
-	if len(envelope.Data) == 0 || string(envelope.Data) == "null" {
+
+	if isEnvelope {
+		if len(probe.Data) == 0 || string(probe.Data) == "null" {
+			return nil
+		}
+		if err := json.Unmarshal(probe.Data, dest); err != nil {
+			return fmt.Errorf("decode response data for %s: %w", path, err)
+		}
 		return nil
 	}
-	if err := json.Unmarshal(envelope.Data, dest); err != nil {
-		return fmt.Errorf("decode response data for %s: %w", path, err)
+
+	if len(payload) == 0 {
+		return nil
+	}
+
+	if err := json.Unmarshal(payload, dest); err != nil {
+		return fmt.Errorf("decode response for %s: %w", path, err)
 	}
 	return nil
+}
+
+func hasEnvelopeShape(payload []byte) bool {
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &root); err != nil {
+		return false
+	}
+	_, hasCode := root["code"]
+	_, hasStatus := root["status"]
+	_, hasMsg := root["msg"]
+	_, hasData := root["data"]
+	return hasCode || hasStatus || hasMsg || hasData
+}
+
+func readRawStringField(payload []byte, field string) string {
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &root); err != nil {
+		return ""
+	}
+	raw, ok := root[field]
+	if !ok || len(raw) == 0 {
+		return ""
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(value)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }

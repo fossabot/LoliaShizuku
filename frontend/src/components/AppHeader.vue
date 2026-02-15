@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { ref, onMounted, onUnmounted, computed } from "vue";
-import { useRouter, useRoute } from "vue-router";
+import { useRoute } from "vue-router";
 import {
   WindowMinimise,
   WindowToggleMaximise,
@@ -10,14 +10,9 @@ import {
   Quit,
 } from "../../wailsjs/runtime/runtime";
 import AppLogo from "./AppLogo.vue";
-import { useTheme } from "vuetify";
 
-const router = useRouter();
 const route = useRoute();
 const maximised = ref(false);
-const theme = useTheme();
-
-const currentRoute = ref("home");
 
 // 判断是否在 OAuth 页面
 const isOAuthPage = computed(() => route.path === '/oauth');

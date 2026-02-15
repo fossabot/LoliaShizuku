@@ -15,12 +15,43 @@ import "./assets/css/comfortaa-fonts.css";
 import "@fortawesome/fontawesome-free/css/all.css";
 import "unfonts.css";
 
+const themeStorageKey = "lolia.theme";
+type ThemeMode = "system" | "lightTheme" | "darkTheme";
+
+const getSystemThemeName = (): "lightTheme" | "darkTheme" =>
+  window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "darkTheme"
+    : "lightTheme";
+
+const readSavedThemeMode = (): ThemeMode => {
+  try {
+    const savedTheme = localStorage.getItem(themeStorageKey);
+    if (
+      savedTheme === "system" ||
+      savedTheme === "lightTheme" ||
+      savedTheme === "darkTheme"
+    ) {
+      return savedTheme;
+    }
+  } catch {
+    // ignore localStorage errors
+  }
+  return "system";
+};
+
+const resolveThemeName = (mode: ThemeMode): "lightTheme" | "darkTheme" => {
+  if (mode === "system") {
+    return getSystemThemeName();
+  }
+  return mode;
+};
+
 const vuetify = createVuetify({
   components,
   directives,
   blueprint: md3,
   theme: {
-    defaultTheme: "lightTheme",
+    defaultTheme: resolveThemeName(readSavedThemeMode()),
     themes: {
       lightTheme,
       darkTheme,
@@ -34,6 +65,19 @@ const vuetify = createVuetify({
     },
   },
 });
+
+const syncSystemTheme = () => {
+  if (readSavedThemeMode() === "system") {
+    vuetify.theme.global.name.value = getSystemThemeName();
+  }
+};
+
+const prefersDarkMedia = window.matchMedia("(prefers-color-scheme: dark)");
+if (typeof prefersDarkMedia.addEventListener === "function") {
+  prefersDarkMedia.addEventListener("change", syncSystemTheme);
+}
+
+syncSystemTheme();
 
 const pinia = createPinia();
 

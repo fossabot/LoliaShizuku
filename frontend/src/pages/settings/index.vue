@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
+import { useTheme } from "vuetify";
 import { storeToRefs } from "pinia";
+import { BrowserOpenURL } from "../../../wailsjs/runtime/runtime";
 import { useGlobalLoadingStore } from "@/stores/globalLoading";
 import { useFrpcInstallStore } from "@/stores/frpcInstall";
 import {
@@ -14,24 +17,46 @@ defineOptions({
   name: "SettingsPage",
 });
 
+type SettingsPanel = "appearance" | "frpc" | "about" | "account";
+type MirrorMode = "official" | "builtin" | "custom";
+type ThemeMode = "system" | "lightTheme" | "darkTheme";
+
+const router = useRouter();
+const theme = useTheme();
+const prefersDarkMedia =
+  typeof window !== "undefined" && typeof window.matchMedia === "function"
+    ? window.matchMedia("(prefers-color-scheme: dark)")
+    : null;
+
 const status = ref<FrpcStatus | null>(null);
-const activePanel = ref<"frpc">("frpc");
+const activePanel = ref<SettingsPanel>("frpc");
 const snackbar = ref(false);
 const snackbarText = ref("");
 const snackbarColor = ref<"success" | "error" | "info">("info");
 const githubMirrorURLInput = ref("");
-const builtinMirrorURL = "https://cdn.akaere.online/github.com";
-type MirrorMode = "official" | "builtin" | "custom";
 const mirrorMode = ref<MirrorMode>("official");
+const themeMode = ref<ThemeMode>("system");
+const logoutLoading = ref(false);
+
+const builtinMirrorURL = "https://cdn.akaere.online/github.com";
+const themeStorageKey = "lolia.theme";
+
 const mirrorModeItems = [
   { title: "github.com", value: "official" as const },
   { title: "cdn.akaere.online/github.com", value: "builtin" as const },
   { title: "自定义网址", value: "custom" as const },
 ];
 
+const themeModeItems = [
+  { title: "跟随系统", value: "system" as const },
+  { title: "浅色模式", value: "lightTheme" as const },
+  { title: "深色模式", value: "darkTheme" as const },
+];
+
 const globalLoadingStore = useGlobalLoadingStore();
 const withGlobalLoading = <T>(task: () => Promise<T>) =>
   globalLoadingStore.withGlobalLoading(task);
+
 const frpcInstallStore = useFrpcInstallStore();
 const { installing, canceling } = storeToRefs(frpcInstallStore);
 const { startInstall, cancelInstall } = frpcInstallStore;
@@ -44,6 +69,21 @@ const showMessage = (
   snackbarColor.value = color;
   snackbar.value = true;
 };
+
+const panelTitle = computed(() => {
+  switch (activePanel.value) {
+    case "appearance":
+      return "外观设置";
+    case "frpc":
+      return "frps 管理";
+    case "about":
+      return "关于";
+    case "account":
+      return "账号";
+    default:
+      return "设置";
+  }
+});
 
 const installedVersion = computed(
   () => status.value?.installed?.version || "未安装",
@@ -68,6 +108,74 @@ const formatTime = (value?: string) => {
     return value;
   }
   return date.toLocaleString();
+};
+
+const openURL = (url: string) => {
+  BrowserOpenURL(url);
+};
+
+const getSystemThemeName = (): "lightTheme" | "darkTheme" =>
+  prefersDarkMedia?.matches ? "darkTheme" : "lightTheme";
+
+const resolveThemeName = (mode: ThemeMode): "lightTheme" | "darkTheme" => {
+  if (mode === "system") {
+    return getSystemThemeName();
+  }
+  return mode;
+};
+
+const handleSystemThemePreferenceChange = () => {
+  if (themeMode.value === "system") {
+    theme.global.name.value = getSystemThemeName();
+  }
+};
+
+const applyTheme = (mode: ThemeMode) => {
+  theme.global.name.value = resolveThemeName(mode);
+  try {
+    localStorage.setItem(themeStorageKey, mode);
+  } catch {
+    // ignore localStorage errors
+  }
+};
+
+const initTheme = () => {
+  let resolvedTheme: ThemeMode = "system";
+  try {
+    const savedTheme = localStorage.getItem(themeStorageKey);
+    if (
+      savedTheme === "system" ||
+      savedTheme === "lightTheme" ||
+      savedTheme === "darkTheme"
+    ) {
+      resolvedTheme = savedTheme;
+    }
+  } catch {
+    // ignore localStorage errors
+  }
+
+  themeMode.value = resolvedTheme;
+  theme.global.name.value = resolveThemeName(resolvedTheme);
+};
+
+const handleThemeChange = (value: string | null) => {
+  let nextTheme: ThemeMode = "lightTheme";
+  if (value === "system") {
+    nextTheme = "system";
+  } else if (value === "darkTheme") {
+    nextTheme = "darkTheme";
+  }
+
+  if (
+    themeMode.value === nextTheme &&
+    theme.global.name.value === resolveThemeName(nextTheme)
+  ) {
+    return;
+  }
+
+  themeMode.value = nextTheme;
+  applyTheme(nextTheme);
+  showMessage("主题已切换", "success");
 };
 
 const loadStatus = async () => {
@@ -166,8 +274,45 @@ const handleClearMirrorURL = async () => {
   await handleSaveMirrorURL();
 };
 
+const handleLogout = async () => {
+  if (logoutLoading.value) {
+    return;
+  }
+
+  logoutLoading.value = true;
+  try {
+    const centerService = (window as any).go?.services?.CenterService;
+    if (centerService?.StopRunner) {
+      await centerService.StopRunner();
+    }
+
+    const tokenService = (window as any).go?.services?.TokenService;
+    if (!tokenService?.ClearOAuthToken) {
+      throw new Error("后端 Token 服务未就绪，请重启应用。");
+    }
+
+    await tokenService.ClearOAuthToken();
+    showMessage("已退出登录", "success");
+    await router.replace("/oauth");
+  } catch (error) {
+    showMessage(error instanceof Error ? error.message : "退出登录失败", "error");
+  } finally {
+    logoutLoading.value = false;
+  }
+};
+
 onMounted(() => {
+  initTheme();
+  if (prefersDarkMedia && typeof prefersDarkMedia.addEventListener === "function") {
+    prefersDarkMedia.addEventListener("change", handleSystemThemePreferenceChange);
+  }
   void loadStatus();
+});
+
+onBeforeUnmount(() => {
+  if (prefersDarkMedia && typeof prefersDarkMedia.removeEventListener === "function") {
+    prefersDarkMedia.removeEventListener("change", handleSystemThemePreferenceChange);
+  }
 });
 </script>
 
@@ -189,9 +334,27 @@ onMounted(() => {
             <v-list-subheader>设置菜单</v-list-subheader>
             <v-list-item
               prepend-icon="fas fa-cloud-arrow-down"
-              title="frpc 管理"
+              title="frps 管理"
               :active="activePanel === 'frpc'"
               @click="activePanel = 'frpc'"
+            />
+            <v-list-item
+              prepend-icon="fas fa-palette"
+              title="外观"
+              :active="activePanel === 'appearance'"
+              @click="activePanel = 'appearance'"
+            />
+            <v-list-item
+              prepend-icon="fas fa-circle-info"
+              title="关于"
+              :active="activePanel === 'about'"
+              @click="activePanel = 'about'"
+            />
+            <v-list-item
+              prepend-icon="fas fa-user"
+              title="账号"
+              :active="activePanel === 'account'"
+              @click="activePanel = 'account'"
             />
           </v-list>
         </v-card>
@@ -200,13 +363,31 @@ onMounted(() => {
       <v-col cols="12" md="9">
         <v-card elevation="2" class="h-100">
           <v-card-title class="d-flex align-center justify-space-between">
-            <div class="text-h6 font-weight-bold">frpc 管理</div>
-            <v-chip size="small" color="primary" variant="tonal">
+            <div class="text-h6 font-weight-bold">{{ panelTitle }}</div>
+            <v-chip v-if="activePanel === 'frpc'" size="small" color="primary" variant="tonal">
               {{ status?.goos }}/{{ status?.goarch }}
             </v-chip>
           </v-card-title>
           <v-divider />
-          <v-card-text class="d-flex flex-column ga-4">
+
+          <v-card-text v-if="activePanel === 'appearance'" class="d-flex flex-column ga-4">
+            <v-sheet border rounded="lg" class="pa-3 d-flex flex-column ga-3">
+              <div class="text-subtitle-2">主题模式</div>
+              <v-select
+                v-model="themeMode"
+                :items="themeModeItems"
+                item-title="title"
+                item-value="value"
+                hide-details="auto"
+                @update:model-value="handleThemeChange"
+              />
+              <div class="text-caption text-medium-emphasis">
+                支持跟随系统、浅色、深色模式，设置会自动保存到本地。
+              </div>
+            </v-sheet>
+          </v-card-text>
+
+          <v-card-text v-else-if="activePanel === 'frpc'" class="d-flex flex-column ga-4">
             <div class="d-flex flex-wrap ga-3">
               <v-btn
                 color="primary"
@@ -284,26 +465,30 @@ onMounted(() => {
               </v-col>
             </v-row>
 
-            <v-divider />
-
-            <div class="text-subtitle-1 font-weight-bold">本地路径</div>
-            <v-sheet border rounded="lg" class="pa-3">
-              <div class="text-body-2 text-wrap">
-                userdata: {{ status?.paths.userdata_dir }}
-              </div>
-              <div class="text-body-2 text-wrap">frpc: {{ status?.paths.frpc_dir }}</div>
-              <div class="text-body-2 text-wrap">bin: {{ status?.paths.bin_dir }}</div>
-              <div class="text-body-2 text-wrap">
-                binary: {{ status?.paths.binary_path }}
-              </div>
-              <div class="text-body-2 text-wrap">
-                downloads: {{ status?.paths.download_dir }}
-              </div>
-              <div class="text-body-2 text-wrap">state: {{ status?.paths.state_path }}</div>
-              <div class="text-body-2 text-wrap">
-                settings: {{ status?.paths.settings_path }}
-              </div>
-            </v-sheet>
+            <v-expansion-panels variant="accordion">
+              <v-expansion-panel>
+                <v-expansion-panel-title class="text-subtitle-2">
+                  本地目录
+                </v-expansion-panel-title>
+                <v-expansion-panel-text>
+                  <div class="text-body-2 text-wrap">
+                    userdata: {{ status?.paths.userdata_dir }}
+                  </div>
+                  <div class="text-body-2 text-wrap">frpc: {{ status?.paths.frpc_dir }}</div>
+                  <div class="text-body-2 text-wrap">bin: {{ status?.paths.bin_dir }}</div>
+                  <div class="text-body-2 text-wrap">
+                    binary: {{ status?.paths.binary_path }}
+                  </div>
+                  <div class="text-body-2 text-wrap">
+                    downloads: {{ status?.paths.download_dir }}
+                  </div>
+                  <div class="text-body-2 text-wrap">state: {{ status?.paths.state_path }}</div>
+                  <div class="text-body-2 text-wrap">
+                    settings: {{ status?.paths.settings_path }}
+                  </div>
+                </v-expansion-panel-text>
+              </v-expansion-panel>
+            </v-expansion-panels>
 
             <v-divider />
 
@@ -344,6 +529,55 @@ onMounted(() => {
               </div>
             </v-sheet>
           </v-card-text>
+
+          <v-card-text v-else-if="activePanel === 'about'" class="d-flex flex-column ga-4">
+            <v-sheet border rounded="lg" class="pa-3 d-flex flex-column ga-2">
+              <div class="text-subtitle-2">LoliaShizuku</div>
+              <div class="text-body-2">
+                「ロリア・雫」由 Wails 驱动的 Lolia FRP 第三方客户端
+              </div>
+            </v-sheet>
+
+            <v-sheet border rounded="lg" class="pa-3 d-flex flex-column ga-2">
+              <div class="text-subtitle-2">相关链接</div>
+              <div class="d-flex flex-wrap ga-2">
+                <v-btn
+                  variant="tonal"
+                  color="primary"
+                  prepend-icon="fas fa-globe"
+                  @click="openURL('https://dash.lolia.link')"
+                >
+                  控制台
+                </v-btn>
+                <v-btn
+                  variant="tonal"
+                  color="secondary"
+                  prepend-icon="fas fa-book"
+                  @click="openURL('https://wails.io')"
+                >
+                  Wails
+                </v-btn>
+              </div>
+            </v-sheet>
+          </v-card-text>
+
+          <v-card-text v-else class="d-flex flex-column ga-4">
+            <v-alert type="warning" variant="tonal">
+              退出后将清除本地 OAuth 凭据，并停止当前本地 Runner。
+            </v-alert>
+
+            <div class="d-flex flex-wrap ga-3">
+              <v-btn
+                color="error"
+                prepend-icon="fas fa-right-from-bracket"
+                :loading="logoutLoading"
+                :disabled="logoutLoading"
+                @click="handleLogout"
+              >
+                退出登录
+              </v-btn>
+            </div>
+          </v-card-text>
         </v-card>
       </v-col>
     </v-row>
@@ -362,5 +596,4 @@ onMounted(() => {
 .settings-layout :deep(.v-card) {
   flex: 1;
 }
-
 </style>
